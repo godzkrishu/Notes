@@ -1,0 +1,26 @@
+###hosting setup ### 1)login :  -> firebase login
+2)Initialize:->  firebase init hosting
+3)Deploy:-> firebase deploy
+	Select these Options:
+	1)Hosting: Configure files for Firebase Hosting and (optionally) set 			up GitHub Action deploys        2)Use an existing project
+       3)  What do you want to use as your public directory?
+      		then paste : build/web
+ 	4)? Configure as a single-page app (rewrite all urls to /index.html)?
+  			yes
+	5) ? Overwrite index.html?—> NO
+After the:
+flutter build web
+firebase deploy
+
+ ##Deploy Multiple Branches:###
+Deploy:->  firebase hosting:channel:deploy feature-login
+			It gives : https://feature-login--lms-rewamp.web.app
+Delete:   ->.   firebase hosting:channel:delete feature-login
+List All:-> firebase hosting:channel:list
+
+###Only On Deployment by Overwriting the previous One## Move to that Branch:-> git checkout main
+ Deploy to main Branch of Deployment -> flutter build web
+                                                                       firebase deploy
+Get 2 urls:  
+https://lms-rewamp.web.app
+ https://lms-rewamp.firebaseapp.com
