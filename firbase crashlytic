@@ -1,30 +1,32 @@
  Firebase Crashlytics Notes
-////1)Initialize in Main file:
+////1)Initialize the crashytic where firebase is initializing 
+  static Future<void> _initFirebase() async {
+    try {
+      await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform,
+      );
+      // Disable in debug
+      await FirebaseCrashlytics.instance.setCrashlyticsCollectionEnabled(
+        !kDebugMode,
+      );
 
-void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
+      /// show  error log only in production mode
+      // 🔥 Flutter framework errors
+      FlutterError.onError =
+          FirebaseCrashlytics.instance.recordFlutterFatalError;
 
-  /// register background handler
-  FirebaseMessaging.onBackgroundMessage(
-    firebaseMessagingBackgroundHandler,
-  );
-  await AppInitializer.init();
-  /// 🔥 Catch Flutter framework errors
-  FlutterError.onError = FirebaseCrashlytics.instance.recordFlutterFatalError;
+      // 🔥 Async / isolate errors
+      PlatformDispatcher.instance.onError = (error, stack) {
+        FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
+        return true;
+      };
 
-  /// 🔥 Catch async & isolate errors
-  PlatformDispatcher.instance.onError = (error, stack) {
-    FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
-    return true;
-  };
+      debugPrint('✅ Firebase & Crashlytics initialized');
+    } catch (e) {
+      print('⚠️ Firebase init skipped (iOS expected): $e');
+    }
+  }
 
-  runApp(
-    DevicePreview(
-      enabled: !bool.fromEnvironment('dart.vm.product'), // 👈 Disabled in release
-      builder: (context) => const ProviderScope(child: MyApp()), // 👈 Wrapped MyApp
-    ),
-  );
-}
 ////2) Set the Loging and  logout tracking
 
   Future<void> login(
