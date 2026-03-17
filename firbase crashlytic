@@ -1,0 +1,195 @@
+ Firebase Crashlytics Notes
+////1)Initialize the crashytic where firebase is initializing 
+  static Future<void> _initFirebase() async {
+    try {
+      await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform,
+      );
+      // Disable in debug
+      await FirebaseCrashlytics.instance.setCrashlyticsCollectionEnabled(
+        !kDebugMode,
+      );
+
+      /// show  error log only in production mode
+      // 🔥 Flutter framework errors
+      FlutterError.onError =
+          FirebaseCrashlytics.instance.recordFlutterFatalError;
+
+      // 🔥 Async / isolate errors
+      PlatformDispatcher.instance.onError = (error, stack) {
+        FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
+        return true;
+      };
+
+      debugPrint('✅ Firebase & Crashlytics initialized');
+    } catch (e) {
+      print('⚠️ Firebase init skipped (iOS expected): $e');
+    }
+  }
+
+////2) Set the Loging and  logout tracking
+
+  Future<void> login(
+    BuildContext context,
+    String email,
+    String password,
+  ) async {
+    state = const AsyncValue.loading();
+
+    try {
+      final token = await AuthServices().login(email, password);
+      if (token != null) {
+        final user = await UserRepository.FetchAndSaveUser(token);
+        if (user != null) {
+          ref.read(userProvider.notifier).state = user;
+          /// set the  data so that i can know who is calling what
+          FirebaseCrashlytics.instance.setUserIdentifier(user.userId.toString());
+          FirebaseCrashlytics.instance.setCustomKey("role", "management");
+          FirebaseCrashlytics.instance.setCustomKey("platform", Platform.operatingSystem);
+          FirebaseCrashlytics.instance.setCustomKey("branchId", user.branchId.toString());
+
+          await AuthRepository.saveToken(token);
+          _token = token;
+          state = const AsyncValue.data(true);
+        } else {
+          state = const AsyncValue.data(false);
+        }
+      } else {
+        state = AsyncValue.data(false);
+        throw Exception('Login failed');
+      }
+    } on ApiException catch (e) {
+      state = AsyncValue.error(e, StackTrace.current);
+      Helper.showSnackBar(context, e.toString());
+    }
+  }
+
+  void logout() async {
+
+    ///log the user details who is logging out
+    FirebaseCrashlytics.instance.log("User logging out");
+    // 🔥 Force sending context BEFORE clearing user
+    FirebaseCrashlytics.instance.recordError(
+      "UserLogout",
+      StackTrace.current,
+      reason: "User initiated logout",
+      fatal: false,
+    );
+
+
+    ///clear all th data
+    ref.read(userProvider.notifier).logout(); //delete user hive box
+    await AuthRepository.removeToken(); // delete token from sharedprefrence
+    await NotificationServices().deleteToken();
+
+    // 🔥 Clear crashlytics user context
+    FirebaseCrashlytics.instance.setUserIdentifier("");
+    FirebaseCrashlytics.instance.setCustomKey("role", "");
+    FirebaseCrashlytics.instance.setCustomKey("branchId", "");
+
+    _token = null;
+    state = const AsyncValue.data(false);
+    logger.e("user logged out");
+  }
+
+////3) track each screen 
+->first add an observer at Navigator
+  return GoRouter(
+    initialLocation: '/',
+    observers: [
+      ScreenTrackingObserver(),
+    ],
+    redirect: (context, state) {
+      final isAuthenticated = ref.read(authProvider).value ?? false;
+     }
+),
+-> then log all at the 
+lib/core/analytic/screen_tracker.dart
+import 'package:flutter/widgets.dart';
+import 'package:firebase_crashlytics/firebase_crashlytics.dart';
+
+class ScreenTrackingObserver extends NavigatorObserver {
+  ScreenTrackingObserver();
+  void _track(Route<dynamic>? route) {
+    if (route == null) return;
+
+    final screenName = route.settings.name ?? route.settings.toString();
+
+    // 🔹 Crashlytics (for debugging context)
+    FirebaseCrashlytics.instance.setCustomKey(
+      'current_screen',
+      screenName,
+    );
+
+    FirebaseCrashlytics.instance.log(
+      'Navigated to $screenName',
+    );
+  }
+
+  @override
+  void didPush(Route route, Route? previousRoute) {
+    _track(route);
+    super.didPush(route, previousRoute);
+  }
+
+  @override
+  void didReplace({Route? newRoute, Route? oldRoute}) {
+    _track(newRoute);
+    super.didReplace(newRoute: newRoute, oldRoute: oldRoute);
+  }
+}
+
+
+
+/// 4)set for api Handler 
+
+import 'dart:io';
+import 'package:dio/dio.dart';
+import 'package:firebase_crashlytics/firebase_crashlytics.dart';
+import 'api_exception.dart';
+
+class ApiErrorHandler {
+  static ApiException handle(dynamic error) {
+
+    FirebaseCrashlytics.instance.setCustomKey(
+      "error_type",
+      error.runtimeType.toString(),
+    );
+    FirebaseCrashlytics.instance.recordError(
+      error,
+      StackTrace.current,
+      reason: 'API Error',
+      fatal: false,
+    );
+
+    // No internet
+    if (error is SocketException) {
+      return ApiException("No internet connection");
+    }
+
+    // Dio error
+    if (error is DioException) {
+      final response = error.response;
+
+      if (response != null) {
+        // Backend error message
+        final message =
+            response.data['message'] ??
+                response.data['error'] ??
+                "Something went wrong";
+        return ApiException(
+          message,
+          statusCode: response.statusCode,
+        );
+      }
+
+      return ApiException("Unable to connect to server");
+    }
+
+    // Parsing / unknown
+    return ApiException("Something went wrong");
+  }
+}
+
+
+/// 5) log each api 
